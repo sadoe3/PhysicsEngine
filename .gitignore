@@ -1,0 +1,33 @@
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+Build/
+Bld/
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio
+*.opensdf
+*.sdf
+*.suo
+*.user
+*.config.old
+[Aa]uto[Rr]efactor/
+
+## NuGet
+# NuGet packages
+*.nupkg
+# The packages folder used by NuGet.
+# Please remove this line if you are not using PackageReference style packages.
+packages/
+
+# IntelliSense and other caches
+.vs/
+ipch/
+*.aps
+*.ncb
+*.pdb
+*.obj
