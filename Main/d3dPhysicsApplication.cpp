@@ -424,8 +424,6 @@ void PhysicsApplication::BuildPSOs()
     ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&stressTestPsoDesc, IID_PPV_ARGS(&mPSOs["instancing"])));
 }
 
-
-
 // sampler preset
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> PhysicsApplication::GetStaticSamplers()
 {
