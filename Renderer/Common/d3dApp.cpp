@@ -5,7 +5,6 @@
 #include "d3dApp.h"
 #include <WindowsX.h>
 // debugging
-#include <pix3.h>
 
 #include "../GeneralConstants.h"
 
@@ -118,7 +117,10 @@ int D3DApp::Run()
 			// 4. Tick, Update, and Draw
 			mTimer.Tick();
 
+			PIXBeginEvent(PIX_COLOR(0, 255, 0), "Update");
 			Update(mTimer);
+			PIXEndEvent();
+
 			Draw(mTimer);
 		}
 	}

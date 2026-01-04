@@ -22,6 +22,9 @@
 #include "../../renderer/imgui/imgui_impl_win32.h"
 #include "../../renderer/imgui/imgui_impl_dx12.h"
 
+// pix
+#include <pix3.h>
+
 class D3DApp
 {
 protected:

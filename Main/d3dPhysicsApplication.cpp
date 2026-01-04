@@ -1276,6 +1276,11 @@ void PhysicsApplication::CleanupSceneResources() {
 // draw
 void PhysicsApplication::Draw(const GameTimer& gt)
 {
+    // pix start
+    PIXBeginEvent(mCommandQueue.Get(), PIX_COLOR(255, 0, 0), "Draw");
+
+
+
     // --- COMMAND LIST RESET AND HEAP SETUP ---
     auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
 
@@ -1365,6 +1370,13 @@ void PhysicsApplication::Draw(const GameTimer& gt)
 
     ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
     mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+
+
+
+    // pix end
+    PIXEndEvent(mCommandQueue.Get());
+
+
 
     // Swap buffers and set fence.
     ThrowIfFailed(mSwapChain->Present(0, 0));
