@@ -505,6 +505,9 @@ void PhysicsApplication::ResetCamera() {
 // update
 void PhysicsApplication::Update(const GameTimer& gt)
 {
+    // PIX - 1. Top-Level Marker: Measures the entire CPU frame time for logic
+    PIXBeginEvent(PIX_COLOR(255, 255, 255), "Update_Total_Frame");
+
     // ------------
     // keyboard event
     OnKeyboardInput(gt);
@@ -548,20 +551,25 @@ void PhysicsApplication::Update(const GameTimer& gt)
     // ------------
 
 
-    // ------------
     // Synchronize with GPU
+    // ------------
     // Cycle through the circular frame resource array.
-    mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
-    mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
-
-    // Wait for the GPU if the current frame resource is in use.
-    if (mCurrFrameResource->Fence != 0 && mFence->GetCompletedValue() < mCurrFrameResource->Fence)
+    // PIX - 2. Synchronization Marker: Checks how long CPU is waiting for GPU
+    PIXBeginEvent(PIX_COLOR(128, 128, 128), "GPU_Sync_Wait");
     {
-        HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
-        ThrowIfFailed(mFence->SetEventOnCompletion(mCurrFrameResource->Fence, eventHandle));
-        WaitForSingleObject(eventHandle, INFINITE);
-        CloseHandle(eventHandle);
+        mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
+        mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
+
+        // Wait for the GPU if the current frame resource is in use.
+        if (mCurrFrameResource->Fence != 0 && mFence->GetCompletedValue() < mCurrFrameResource->Fence)
+        {
+            HANDLE eventHandle = CreateEventEx(nullptr, false, false, EVENT_ALL_ACCESS);
+            ThrowIfFailed(mFence->SetEventOnCompletion(mCurrFrameResource->Fence, eventHandle));
+            WaitForSingleObject(eventHandle, INFINITE);
+            CloseHandle(eventHandle);
+        }
     }
+    PIXEndEvent(); // End GPU_Sync_Wait
     // ------------
 
 
@@ -636,14 +644,21 @@ void PhysicsApplication::Update(const GameTimer& gt)
 
     // Update GPU stuff
     // ------------
-    if (mCurrentSceneState == SceneState::STRESS_TEST)
-        UpdateInstanceData(gt);
-    UpdateObjectCBs();
-    UpdateMaterialBuffer(gt);
-    UpdateShadowTransform(gt);
-    UpdateMainPassCB(gt);
-    UpdateShadowPassCB(gt);
+    // PIX - 3. ConstantBuffer-Update Marker: Checks how long it takes to update constant buffers
+    PIXBeginEvent(PIX_COLOR(0, 128, 0), "Update_ConstantBuffers");
+    {
+        if (mCurrentSceneState == SceneState::STRESS_TEST)
+            UpdateInstanceData(gt);
+        UpdateObjectCBs();
+        UpdateMaterialBuffer(gt);
+        UpdateShadowTransform(gt);
+        UpdateMainPassCB(gt);
+        UpdateShadowPassCB(gt);
+    }
+    PIXEndEvent(); // End Update_ConstantBuffers
     // ------------
+
+    PIXEndEvent(); // End Update_Total_Frame
 }
 
 // update gpu stuff
@@ -898,185 +913,196 @@ void PhysicsApplication::UpdateShadowPassCB(const GameTimer& gt)
 
 // physics main loop
 void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
+    // PIX - 0. Main-Loop Marker
+    PIXBeginEvent(PIX_COLOR(255, 0, 0), "Physics_Main_Loop");
+
     m_manifolds.RemoveExpired();
 
-    // Gravity impulse
+    // PIX - 1. Gravity Marker
+    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step1_Gravity");
     for (int currentBodyIndex = 0; currentBodyIndex < mBodies.size(); ++currentBodyIndex) {
         Body* currentBody = &mBodies[currentBodyIndex];
+        if (currentBody->m_invMass == 0.0f) continue; // Optimization: Skip statics
 
         float mass = 1.0f / currentBody->m_invMass;
         Vec3 impulseGravity = Vec3(0, 0, -10) * mass * deltaSecond;
         currentBody->ApplyImpulseLinear(impulseGravity);
     }
+    PIXEndEvent();  // End Physics_Step1_Gravity
 
-    int numContacts = 0;
-    contact_t* contacts;
-    if (mIsBroadNarrowOn == true) {
-        // BroadPhase (build potential collision pairs)
-        std::vector<collisionPair_t> collisionPairs;
-        BroadPhase(mBodies.data(), static_cast<int>(mBodies.size()), collisionPairs, deltaSecond);
+    // Use vector to prevent Stack Overflow during stress tests
+    std::vector<contact_t> contacts;
 
+    // PIX - 2. Collision-Detection Marker (Moved OUTSIDE if/else)
+    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step2_BroadNarrowPhase");
+    {
+        if (mIsBroadNarrowOn == true) {
+            // BroadPhase
+            std::vector<collisionPair_t> collisionPairs;
+            BroadPhase(mBodies.data(), static_cast<int>(mBodies.size()), collisionPairs, deltaSecond);
 
-        // NarrowPhase (perform actual collision detection)
-        contacts = reinterpret_cast<contact_t*>(alloca(sizeof(contact_t) * collisionPairs.size()));
-        // check for collisions with other bodies
-        // now using collision pairs
-        for (int currentPairIndex = 0; currentPairIndex < collisionPairs.size(); ++currentPairIndex) {
-            const collisionPair_t& currentPair = collisionPairs[currentPairIndex];
-            Body* bodyA = &mBodies[currentPair.a];
-            Body* bodyB = &mBodies[currentPair.b];
+            // Reserve memory to avoid reallocations
+            contacts.reserve(collisionPairs.size());
 
-            // skip body pairs with infinite mass
-            if (0.0f == bodyA->m_invMass && 0.0f == bodyB->m_invMass)
-                continue;
+            // NarrowPhase
+            for (const auto& currentPair : collisionPairs) {
+                Body* bodyA = &mBodies[currentPair.a];
+                Body* bodyB = &mBodies[currentPair.b];
 
-            // check for intersection
-            contact_t contact;
-            if (DoesIntersect(bodyA, bodyB, deltaSecond, contact)) {
-                if (contact.timeOfImpact == 0.0f) {
-                    // static contact
-                    // handled by the penetration constraint
-                    m_manifolds.AddContact(contact);
-                }
-                else {
-                    // dynamic contact
-                    contacts[numContacts] = contact;
-                    ++numContacts;
-                }
-            }
-        }
-    }
-    else {
-        const auto maxContacts = mBodies.size() * mBodies.size();
-        contacts = reinterpret_cast<contact_t*>(alloca(sizeof(contact_t) * maxContacts));
-
-        for (int i = 0; i < mBodies.size(); i++) {
-            for (int j = i + 1; j < mBodies.size(); j++) {
-                Body* bodyA = &mBodies[i];
-                Body* bodyB = &mBodies[j];
-
-                // skip body pairs with infinite mass
                 if (0.0f == bodyA->m_invMass && 0.0f == bodyB->m_invMass)
                     continue;
 
-                // check for intersection
                 contact_t contact;
                 if (DoesIntersect(bodyA, bodyB, deltaSecond, contact)) {
                     if (contact.timeOfImpact == 0.0f) {
                         // static contact
-                        // handled by the penetration constraint
                         m_manifolds.AddContact(contact);
                     }
                     else {
                         // dynamic contact
-                        contacts[numContacts] = contact;
-                        ++numContacts;
+                        contacts.push_back(contact);
+                    }
+                }
+            }
+        }
+        else {
+            // Brute force
+            contacts.reserve(mBodies.size()); // Approximation
+
+            for (int currentBodyA = 0; currentBodyA < mBodies.size(); ++currentBodyA) {
+                for (int currentBodyB = currentBodyA + 1; currentBodyB < mBodies.size(); currentBodyB++) {
+                    Body* bodyA = &mBodies[currentBodyA];
+                    Body* bodyB = &mBodies[currentBodyB];
+
+                    if (0.0f == bodyA->m_invMass && 0.0f == bodyB->m_invMass)
+                        continue;
+
+                    contact_t contact;
+                    if (DoesIntersect(bodyA, bodyB, deltaSecond, contact)) {
+                        if (contact.timeOfImpact == 0.0f) {
+                            // static contact
+                            m_manifolds.AddContact(contact);
+                        }
+                        else {
+                            // dynamic contact
+                            contacts.push_back(contact);
+                        }
                     }
                 }
             }
         }
     }
+    PIXEndEvent();  // End Physics_Step2_BroadNarrowPhase
 
 
-
-    // sort times of impact from earliest to latest
-    if (numContacts > 1)
-        qsort(contacts, numContacts, sizeof(contact_t), CompareContacts);
-
-
-    // resolve constraints
-    for (int currentConstraintIndex = 0; currentConstraintIndex < mConstraints.size(); ++currentConstraintIndex)
-        mConstraints[currentConstraintIndex]->PreSolve(deltaSecond);
-    m_manifolds.PreSolve(deltaSecond);
-
-    // apply iterative approach
-    const int maxIterationCount = 5;
-    for (int currentIterativeCount = 0; currentIterativeCount < maxIterationCount; ++currentIterativeCount) {
-        for (int currentConstraintIndex = 0; currentConstraintIndex < mConstraints.size(); ++currentConstraintIndex)
-            mConstraints[currentConstraintIndex]->Solve();
-        m_manifolds.Solve();
-    }
-
-    for (int currentConstraintIndex = 0; currentConstraintIndex < mConstraints.size(); ++currentConstraintIndex)
-        mConstraints[currentConstraintIndex]->PostSolve();
-    m_manifolds.PostSolve();
-
-
-
-    // resolve collisions
-    // note that there's no recalculation of earlier collisions for later ones to improve performance.
-    // thus, while the first collision is handled correctly, later collisions may be processed improperly if they are related to the earlier collisions.
+    // PIX - 3. Solver Marker
+    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step3_Solver");
     float accumulatedTime = 0.0f;
-    for (int currentContactIndex = 0; currentContactIndex < numContacts; ++currentContactIndex) {
-        contact_t& contact = contacts[currentContactIndex];
-        const float deltaTime = contact.timeOfImpact - accumulatedTime;
+    {
+        // sort times of impact
+        if (contacts.size() > 1)
+            std::sort(contacts.begin(), contacts.end(), [](const contact_t& a, const contact_t& b) {
+            return a.timeOfImpact < b.timeOfImpact;
+                });
 
-        // position update
-        for (auto& currentBody : mBodies) {
-            const auto previousPosition = currentBody.m_position;
-            currentBody.Update(deltaTime);
-            auto difVector = previousPosition - currentBody.m_position;
-            if (difVector.GetLengthSqr() > 0.000000001f)
-                mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+        // resolve constraints
+        for (auto* currentConstraint : mConstraints) 
+            currentConstraint->PreSolve(deltaSecond);
+        m_manifolds.PreSolve(deltaSecond);
+
+        const int maxIterationCount = 5;
+        // apply iterative approach
+        for (int i = 0; i < maxIterationCount; ++i) {
+            for (auto* currentConstraint : mConstraints)
+                currentConstraint->Solve();
+            m_manifolds.Solve();
         }
 
-        ResolveContact(contact);
-        accumulatedTime += deltaTime;
-    }
+        for (auto* currentConstraint : mConstraints)
+            currentConstraint->PostSolve();
+        m_manifolds.PostSolve();
 
+        // resolve collisions
+        // note that there's no recalculation of earlier collisions for later ones to improve performance.
+        // thus, while the first collision is handled correctly, later collisions may be processed improperly if they are related to the earlier collisions.
+        for (int currentContactIndex = 0; currentContactIndex < contacts.size(); ++currentContactIndex) {
+            contact_t& contact = contacts[currentContactIndex];
+            const float deltaTime = contact.timeOfImpact - accumulatedTime;
+
+            // PERFORMANCE HIT: Updating ALL bodies for EVERY contact
+            for (auto& currentBody : mBodies) {
+                // position update
+                const auto previousPosition = currentBody.m_position;
+                currentBody.Update(deltaTime);
+
+                // Flagging dirty frames
+                auto difVector = previousPosition - currentBody.m_position;
+                if (difVector.GetLengthSqr() > 1e-9f) // Optimized float check
+                    mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+            }
+
+            ResolveContact(contact);
+            accumulatedTime += deltaTime;
+        }
+    }
+    PIXEndEvent();  // End Physics_Step3_Solver
+
+
+    // PIX - 4. State-Update Marker
+    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step4_StateUpdate");
     // update the positions for the rest of this frame's time
-    const float timeRemaining = deltaSecond - accumulatedTime;
-    if (timeRemaining > 0.0f) {
-        for (auto& currentBody : mBodies) {
-            const auto previousPosition = currentBody.m_position;
-            currentBody.Update(timeRemaining);
-            auto difVector = previousPosition - currentBody.m_position;
-            if (difVector.GetLengthSqr() > 0.000000001f)
-                mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+    {
+        const float timeRemaining = deltaSecond - accumulatedTime;
+        if (timeRemaining > 0.0f) {
+            for (auto& currentBody : mBodies) {
+                const auto previousPosition = currentBody.m_position;
+                currentBody.Update(timeRemaining);
+
+                auto difVector = previousPosition - currentBody.m_position;
+                if (difVector.GetLengthSqr() > 1e-9f)
+                    mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+            }
         }
     }
+    PIXEndEvent();  // End Physics_Step4_StateUpdate
 
-    // redraw items that are related to constraints or manifolds
-    for (int currentConstraintIndex = 0; currentConstraintIndex < mConstraints.size(); ++currentConstraintIndex) {
-        mAllRitems[mConstraints[currentConstraintIndex]->m_bodyA->m_id].get()->NumFramesDirty = gNumFrameResources;
-        mAllRitems[mConstraints[currentConstraintIndex]->m_bodyB->m_id].get()->NumFramesDirty = gNumFrameResources;
-    }
-    for (int currentIndex = 0; currentIndex < m_manifolds.m_manifolds.size(); ++currentIndex) {
-        mAllRitems[m_manifolds.m_manifolds[currentIndex].m_bodyA->m_id].get()->NumFramesDirty = gNumFrameResources;
-        mAllRitems[m_manifolds.m_manifolds[currentIndex].m_bodyB->m_id].get()->NumFramesDirty = gNumFrameResources;
-    }
 
-    // rebuild the render items if it moves
-    unsigned currentIndex = 0;
-    const size_t END_INDEX = mBodies.size() - GeneralData::NumSandboxGroundBodies;
-    for (auto& currentRenderItem : mAllRitems) {
-        if (currentRenderItem->NumFramesDirty > 0 && (
-            (mRequestedSceneState == SceneState::STRESS_TEST) ||
-            (mRequestedSceneState == SceneState::SANDBOX && (currentIndex <= END_INDEX))
-            )) {
-            // Convert the custom Quat to an XMVECTOR.
-            XMVECTOR orientationVector = XMVectorSet(mBodies[currentIndex].m_orientation.x,
-                mBodies[currentIndex].m_orientation.z,
-                -mBodies[currentIndex].m_orientation.y,
-                mBodies[currentIndex].m_orientation.w);
-            // Create the rotation matrix from the orientation vector.
-            XMMATRIX rotationMatrix = XMMatrixRotationQuaternion(orientationVector);
-
-            XMVECTOR positionVector = XMVectorSet(mBodies[currentIndex].m_position.x,
-                mBodies[currentIndex].m_position.z,
-                -mBodies[currentIndex].m_position.y,
-                0.0f);
-            XMMATRIX translationMatrix = XMMatrixTranslationFromVector(positionVector);
-
-            // Combine the rotation and translation matrices.
-            XMMATRIX currentWorldMatrix = rotationMatrix * translationMatrix;
-
-            XMStoreFloat4x4(&mAllRitems[currentIndex].get()->World, currentWorldMatrix);
+    // PIX - 5. Render-Sync Marker
+    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step5_RenderSync");
+    {
+        // redraw items that are related to constraints or manifolds
+        for (auto* currentConstraint : mConstraints) {
+            mAllRitems[currentConstraint->m_bodyA->m_id]->NumFramesDirty = gNumFrameResources;
+            mAllRitems[currentConstraint->m_bodyB->m_id]->NumFramesDirty = gNumFrameResources;
         }
-        ++currentIndex;
+        for (const auto& currentManifold : m_manifolds.m_manifolds) {
+            mAllRitems[currentManifold.m_bodyA->m_id]->NumFramesDirty = gNumFrameResources;
+            mAllRitems[currentManifold.m_bodyB->m_id]->NumFramesDirty = gNumFrameResources;
+        }
+
+        // Rebuild matrices
+        // Using direct loop logic for better readability
+        const size_t END_INDEX = mBodies.size() - GeneralData::NumSandboxGroundBodies;
+        for (size_t currentBodyIndex = 0; currentBodyIndex < mBodies.size(); ++currentBodyIndex) {
+            // Check condition for Sandbox/Stress Test
+            bool shouldRender = (mRequestedSceneState == SceneState::STRESS_TEST) ||
+                (mRequestedSceneState == SceneState::SANDBOX && currentBodyIndex <= END_INDEX);
+
+            if (mAllRitems[currentBodyIndex]->NumFramesDirty > 0 && shouldRender) {
+                // SIMD Optimization: Load directly into registers if possible in future
+                Body& currentBody = mBodies[currentBodyIndex];
+                XMVECTOR orientationVector = XMVectorSet(currentBody.m_orientation.x, currentBody.m_orientation.z, -currentBody.m_orientation.y, currentBody.m_orientation.w);
+                XMVECTOR positionVector = XMVectorSet(currentBody.m_position.x, currentBody.m_position.z, -currentBody.m_position.y, 0.0f);
+
+                XMMATRIX world = XMMatrixRotationQuaternion(orientationVector) * XMMatrixTranslationFromVector(positionVector);
+                XMStoreFloat4x4(&mAllRitems[currentBodyIndex]->World, world);
+            }
+        }
+        SaveCurrentFrameState();
     }
-    // store current scene data
-    SaveCurrentFrameState();
+    PIXEndEvent();  // End Physics_Step5_RenderSync
+
+    PIXEndEvent(); // End Physics_Main_Loop
 }
 
 // another physics method for picked item
