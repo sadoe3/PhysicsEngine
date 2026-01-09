@@ -117,9 +117,7 @@ int D3DApp::Run()
 			// 4. Tick, Update, and Draw
 			mTimer.Tick();
 
-			PIXBeginEvent(PIX_COLOR(0, 255, 0), "Update");
 			Update(mTimer);
-			PIXEndEvent();
 
 			Draw(mTimer);
 		}
