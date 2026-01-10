@@ -422,6 +422,27 @@ void PhysicsApplication::BuildPSOs()
         mShaders["instancedPS"]->GetBufferSize()
     };
     ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&stressTestPsoDesc, IID_PPV_ARGS(&mPSOs["instancing"])));
+
+
+
+
+    //
+    // PSO for Shadow Pass for Stress Test (Instancing)
+    // -------------------------------------------------------------------
+    // Copy the existing instancing PSO description as a base.
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC shadowStressPsoDesc = stressTestPsoDesc;
+
+    // CRITICAL FIX: Match the state used in DrawSceneToShadowMap (OMSetRenderTargets(0, nullptr, ...))
+    // AMD/ATI drivers strictly require the PSO's NumRenderTargets to match the command list state.
+    shadowStressPsoDesc.NumRenderTargets = 0;
+    shadowStressPsoDesc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+
+    // OPTIMIZATION: Shadow pass only needs depth. We can disable the Pixel Shader for performance.
+    // If your instanced GS/VS already handles position output, PS is not required for depth-only pass.
+    shadowStressPsoDesc.PS = { nullptr, 0 };
+
+    // Create the specialized PSO for Shadow Instancing.
+    ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&shadowStressPsoDesc, IID_PPV_ARGS(&mPSOs["shadow_instancing"])));
 }
 
 // sampler preset
@@ -1302,15 +1323,10 @@ void PhysicsApplication::CleanupSceneResources() {
 // draw
 void PhysicsApplication::Draw(const GameTimer& gt)
 {
-    // pix start
+    // PIX Start
     PIXBeginEvent(mCommandQueue.Get(), PIX_COLOR(255, 0, 0), "Draw");
 
-
-
-    // --- COMMAND LIST RESET AND HEAP SETUP ---
     auto cmdListAlloc = mCurrFrameResource->CmdListAlloc;
-
-    // Reuse the memory associated with command recording.
     ThrowIfFailed(cmdListAlloc->Reset());
     ThrowIfFailed(mCommandList->Reset(cmdListAlloc.Get(), mPSOs["opaque"].Get()));
 
@@ -1318,93 +1334,62 @@ void PhysicsApplication::Draw(const GameTimer& gt)
     mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
     mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
 
+    // --- REMOVED: InstanceBuffer Barriers ---
+    // Since InstanceBuffer is an UploadBuffer, we do NOT transition it. 
+    // It is already in the required GENERIC_READ state.
 
     // --- COMMON BUFFER BINDING ---
-    // Bind all the materials (Root Slot 2: Shader Resource View).
     auto matBuffer = mCurrFrameResource->MaterialBuffer->Resource();
     mCommandList->SetGraphicsRootShaderResourceView(2, matBuffer->GetGPUVirtualAddress());
-    // Bind null SRV for the shadow map pass's initial state (Root Slot 3).
     mCommandList->SetGraphicsRootDescriptorTable(3, mNullSrv);
-    // Bind all the textures used (Root Slot 4: Descriptor Table, starts at index 0).
     mCommandList->SetGraphicsRootDescriptorTable(4, mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    // --- END COMMON BUFFER BINDING ---
 
-
-
-    // --- SHADOW MAP AND MAIN RENDER TARGET SETUP ---
+    // --- SHADOW MAP PASS ---
     DrawSceneToShadowMap();
 
     mCommandList->RSSetViewports(1, &mScreenViewport);
     mCommandList->RSSetScissorRects(1, &mScissorRect);
 
-    // Back Buffer state transition: PRESENT -> RENDER_TARGET.
+    // Transition Back Buffer (Default Heap) - THIS IS VALID
     mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
         D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
-    // Clear buffers and set render targets.
     mCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
     mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
     mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
 
-    // Bind the Pass Constant Buffer (Root Slot 1).
     auto passCB = mCurrFrameResource->PassCB->Resource();
     mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
 
-    // Bind the sky cube map texture (Reuses Root Slot 3).
     CD3DX12_GPU_DESCRIPTOR_HANDLE skyTexDescriptor(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
     skyTexDescriptor.Offset(mSkyTexHeapIndex, mCbvSrvUavDescriptorSize);
     mCommandList->SetGraphicsRootDescriptorTable(3, skyTexDescriptor);
-    // --- END SHADOW MAP AND MAIN RENDER TARGET SETUP ---
 
-
-
-
-    // --- TWO-PASS RENDERING LOGIC (SOLID AND WIREFRAME OVERLAY) ---
-    // PASS 1: Solid Rendering (Handles PSO switching internally in DrawRenderItems).
+    // --- TWO-PASS RENDERING LOGIC ---
     DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque], mCollisionBodies, false);
 
-    // PASS 2: Wireframe Overlay (Only for collision bodies).
     if (mIsWireframeDebugEnabled && !mCollisionBodies.empty())
     {
-        // Switch PSO explicitly for the wireframe pass.
         mCommandList->SetPipelineState(mPSOs["wireframe"].Get());
-
-        // Draw ONLY the collision bodies (DrawRenderItems handles the culling).
         DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque], mCollisionBodies, true);
     }
 
-    // Draw contact points if object is picked.
     if (mPickedRenderItem != nullptr && mIsHitResultVisible == true)
         DrawContactPoints(mCommandList.Get(), &mBodies[mPickedRenderItem->ObjCBIndex]);
-    // --- END TWO-PASS RENDERING LOGIC (SOLID AND WIREFRAME OVERLAY) ---
 
-
-
-
-    // --- IMGUI RENDERING AND COMMAND EXECUTION ---
+    // --- IMGUI ---
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mCommandList.Get());
-    // --- END IMGUI RENDERING AND COMMAND EXECUTION ---
 
-
-
-    // Back Buffer state transition: RENDER_TARGET -> PRESENT.
+    // Transition Back Buffer: RT -> PRESENT
     mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
         D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
-    // Close command list and execute.
     ThrowIfFailed(mCommandList->Close());
-
     ID3D12CommandList* cmdsLists[] = { mCommandList.Get() };
     mCommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
 
-
-
-    // pix end
     PIXEndEvent(mCommandQueue.Get());
 
-
-
-    // Swap buffers and set fence.
     ThrowIfFailed(mSwapChain->Present(0, 0));
     mCurrBackBuffer = (mCurrBackBuffer + 1) % SwapChainBufferCount;
     mCurrFrameResource->Fence = ++mCurrentFence;
@@ -1415,30 +1400,31 @@ void PhysicsApplication::DrawSceneToShadowMap()
     mCommandList->RSSetViewports(1, &mShadowMap->Viewport());
     mCommandList->RSSetScissorRects(1, &mShadowMap->ScissorRect());
 
-    // Change to DEPTH_WRITE.
+    // Transition Shadow Map (Default Heap) - THIS IS VALID
     mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->Resource(),
         D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE));
 
     UINT passCBByteSize = d3dUtil::CalcConstantBufferByteSize(sizeof(PassConstants));
 
-    // Clear the back buffer and depth buffer.
     mCommandList->ClearDepthStencilView(mShadowMap->Dsv(),
         D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
 
-    // Set null render target because we are only going to draw to
-    // depth buffer.  Setting a null render target will disable color writes.
-    // Note the active PSO also must specify a render target count of 0.
     mCommandList->OMSetRenderTargets(0, nullptr, false, &mShadowMap->Dsv());
 
-    // Bind the pass constant buffer for the shadow map pass.
     auto passCB = mCurrFrameResource->PassCB->Resource();
     D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + 1 * passCBByteSize;
     mCommandList->SetGraphicsRootConstantBufferView(1, passCBAddress);
 
+    // Ensure correct PSO for Instancing in Stress Test mode
+    if (mCurrentSceneState == SceneState::STRESS_TEST)
+    {
+        // NOTE: The "instancing" PSO must be compatible with 0 Render Targets
+        mCommandList->SetPipelineState(mPSOs["shadow_instancing"].Get());
+    }
+
     std::unordered_set<Body*> emptySet;
     DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque], emptySet, false);
 
-    // Change back to GENERIC_READ so we can read the texture in a shader.
     mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(mShadowMap->Resource(),
         D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_GENERIC_READ));
 }
