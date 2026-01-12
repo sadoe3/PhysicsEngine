@@ -17,6 +17,12 @@
 // handle conflict between min/max macro in Windows and std::min/max
 #define NOMINMAX 
 
+// use pix in release mode
+#ifndef SHIPPING
+#define USE_PIX 
+#endif
+
+
 
 // ==========================================================
 // 2. OS/DirectX Headers
@@ -103,9 +109,6 @@
 
 #ifndef SHIPPING
 struct FScopedCPUStat {
-	FScopedCPUStat(UINT32 color, PCSTR title) {
-		PIXBeginEvent(color, title);
-	}
 	FScopedCPUStat(UINT32 color, PCSTR formattedTitle, ...) {
 		char buffer[256];
 

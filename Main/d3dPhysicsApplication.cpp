@@ -522,7 +522,7 @@ void PhysicsApplication::ResetCamera() {
 void PhysicsApplication::Update(const GameTimer& gt)
 {
     // PIX - 1. Top-Level Marker: Measures the entire CPU frame time for logic
-    PIXBeginEvent(PIX_COLOR(255, 255, 255), "Update_Total_Frame");
+    SetCPUStat(PIX_COLOR(255, 255, 255), "Update_Total_Frame");
 
     // ------------
     // keyboard event
@@ -571,8 +571,8 @@ void PhysicsApplication::Update(const GameTimer& gt)
     // ------------
     // Cycle through the circular frame resource array.
     // PIX - 2. Synchronization Marker: Checks how long CPU is waiting for GPU
-    PIXBeginEvent(PIX_COLOR(128, 128, 128), "GPU_Sync_Wait");
     {
+        SetCPUStat(PIX_COLOR(128, 128, 128), "GPU_Sync_Wait");
         mCurrFrameResourceIndex = (mCurrFrameResourceIndex + 1) % gNumFrameResources;
         mCurrFrameResource = mFrameResources[mCurrFrameResourceIndex].get();
 
@@ -585,7 +585,6 @@ void PhysicsApplication::Update(const GameTimer& gt)
             CloseHandle(eventHandle);
         }
     }
-    PIXEndEvent(); // End GPU_Sync_Wait
     // ------------
 
 
@@ -661,8 +660,8 @@ void PhysicsApplication::Update(const GameTimer& gt)
     // Update GPU stuff
     // ------------
     // PIX - 3. ConstantBuffer-Update Marker: Checks how long it takes to update constant buffers
-    PIXBeginEvent(PIX_COLOR(0, 128, 0), "Update_ConstantBuffers");
     {
+        SetCPUStat(PIX_COLOR(0, 128, 0), "Update_ConstantBuffers");
         if (mCurrentSceneState == SceneState::STRESS_TEST)
             UpdateInstanceData(gt);
         UpdateObjectCBs();
@@ -671,10 +670,7 @@ void PhysicsApplication::Update(const GameTimer& gt)
         UpdateMainPassCB(gt);
         UpdateShadowPassCB(gt);
     }
-    PIXEndEvent(); // End Update_ConstantBuffers
     // ------------
-
-    PIXEndEvent(); // End Update_Total_Frame
 }
 
 // update gpu stuff
@@ -930,12 +926,9 @@ void PhysicsApplication::UpdateShadowPassCB(const GameTimer& gt)
 // physics main loop
 void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
     // PIX - 0. Main-Loop Marker
-    PIXBeginEvent(PIX_COLOR(255, 0, 0), "Physics_Main_Loop");
+    SetCPUStat(PIX_COLOR(255, 0, 0), "Physics_Main_Loop");
 
     m_manifolds.RemoveExpired();
-
-    // PIX - 1. Gravity Marker
-    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step1_Gravity");
     for (int currentBodyIndex = 0; currentBodyIndex < mBodies.size(); ++currentBodyIndex) {
         Body* currentBody = &mBodies[currentBodyIndex];
         if (currentBody->m_invMass == 0.0f) continue; // Optimization: Skip statics
@@ -944,39 +937,45 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
         Vec3 impulseGravity = Vec3(0, 0, -10) * mass * deltaSecond;
         currentBody->ApplyImpulseLinear(impulseGravity);
     }
-    PIXEndEvent();  // End Physics_Step1_Gravity
 
     // Use vector to prevent Stack Overflow during stress tests
     std::vector<contact_t> contacts;
 
-    // PIX - 2. Collision-Detection Marker (Moved OUTSIDE if/else)
-    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step2_BroadNarrowPhase");
+    // PIX - 1. Collision-Detection Marker
     {
+        SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step1_BroadNarrowPhase");
         if (mIsBroadNarrowOn == true) {
             // BroadPhase
             std::vector<collisionPair_t> collisionPairs;
-            BroadPhase(mBodies.data(), static_cast<int>(mBodies.size()), collisionPairs, deltaSecond);
-
-            // Reserve memory to avoid reallocations
-            contacts.reserve(collisionPairs.size());
+            {
+                SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step1_Sub1_BroadPhase");
+                BroadPhase(mBodies.data(), static_cast<int>(mBodies.size()), collisionPairs, deltaSecond);
+            }
 
             // NarrowPhase
-            for (const auto& currentPair : collisionPairs) {
-                Body* bodyA = &mBodies[currentPair.a];
-                Body* bodyB = &mBodies[currentPair.b];
+            // TODO: current longest task
+            {
+                SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step1_Sub2_NarrowPhase");
+                // Reserve memory to avoid reallocations
+                contacts.reserve(collisionPairs.size());
+                for (const auto& currentPair : collisionPairs) {
+                    Body* bodyA = &mBodies[currentPair.a];
+                    Body* bodyB = &mBodies[currentPair.b];
 
-                if (0.0f == bodyA->m_invMass && 0.0f == bodyB->m_invMass)
-                    continue;
+                    if (0.0f == bodyA->m_invMass && 0.0f == bodyB->m_invMass)
+                        continue;
 
-                contact_t contact;
-                if (DoesIntersect(bodyA, bodyB, deltaSecond, contact)) {
-                    if (contact.timeOfImpact == 0.0f) {
-                        // static contact
-                        m_manifolds.AddContact(contact);
-                    }
-                    else {
-                        // dynamic contact
-                        contacts.push_back(contact);
+                    contact_t contact;
+                    // TODO: current main point to optimize
+                    if (DoesIntersect(bodyA, bodyB, deltaSecond, contact)) {
+                        if (contact.timeOfImpact == 0.0f) {
+                            // static contact
+                            m_manifolds.AddContact(contact);
+                        }
+                        else {
+                            // dynamic contact
+                            contacts.push_back(contact);
+                        }
                     }
                 }
             }
@@ -1008,66 +1007,87 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
             }
         }
     }
-    PIXEndEvent();  // End Physics_Step2_BroadNarrowPhase
 
 
-    // PIX - 3. Solver Marker
-    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step3_Solver");
+    // PIX - 2. Solver Marker
     float accumulatedTime = 0.0f;
     {
+        SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Solver");
+
         // sort times of impact
-        if (contacts.size() > 1)
-            std::sort(contacts.begin(), contacts.end(), [](const contact_t& a, const contact_t& b) {
-            return a.timeOfImpact < b.timeOfImpact;
-                });
+        {
+            SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub1_SortTOI");
 
-        // resolve constraints
-        for (auto* currentConstraint : mConstraints) 
-            currentConstraint->PreSolve(deltaSecond);
-        m_manifolds.PreSolve(deltaSecond);
-
-        const int maxIterationCount = 5;
-        // apply iterative approach
-        for (int i = 0; i < maxIterationCount; ++i) {
-            for (auto* currentConstraint : mConstraints)
-                currentConstraint->Solve();
-            m_manifolds.Solve();
+            if (contacts.size() > 1)
+                std::sort(contacts.begin(), contacts.end(), [](const contact_t& a, const contact_t& b) {
+                return a.timeOfImpact < b.timeOfImpact;
+                    });
         }
 
-        for (auto* currentConstraint : mConstraints)
-            currentConstraint->PostSolve();
-        m_manifolds.PostSolve();
+
+        // resolve constraints
+        {
+            SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub2_ResolveConstraints");
+
+            {
+                SetCPUStat(PIX_COLOR_DEFAULT, "Physics_PreSolve");
+                for (auto* currentConstraint : mConstraints)
+                    currentConstraint->PreSolve(deltaSecond);
+                m_manifolds.PreSolve(deltaSecond);
+            }
+
+            {
+                SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Solve");
+                const int maxIterationCount = 5;
+                // apply iterative approach
+                for (int i = 0; i < maxIterationCount; ++i) {
+                    for (auto* currentConstraint : mConstraints)
+                        currentConstraint->Solve();
+                    m_manifolds.Solve();
+                }
+            }
+
+            {
+                SetCPUStat(PIX_COLOR_DEFAULT, "Physics_PostSolve");
+                for (auto* currentConstraint : mConstraints)
+                    currentConstraint->PostSolve();
+                m_manifolds.PostSolve();
+            }
+        }
 
         // resolve collisions
         // note that there's no recalculation of earlier collisions for later ones to improve performance.
         // thus, while the first collision is handled correctly, later collisions may be processed improperly if they are related to the earlier collisions.
-        for (int currentContactIndex = 0; currentContactIndex < contacts.size(); ++currentContactIndex) {
-            contact_t& contact = contacts[currentContactIndex];
-            const float deltaTime = contact.timeOfImpact - accumulatedTime;
+        {
+            SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub3_ResolveCollisions");
 
-            // PERFORMANCE HIT: Updating ALL bodies for EVERY contact
-            for (auto& currentBody : mBodies) {
-                // position update
-                const auto previousPosition = currentBody.m_position;
-                currentBody.Update(deltaTime);
+            for (int currentContactIndex = 0; currentContactIndex < contacts.size(); ++currentContactIndex) {
+                contact_t& contact = contacts[currentContactIndex];
+                const float deltaTime = contact.timeOfImpact - accumulatedTime;
 
-                // Flagging dirty frames
-                auto difVector = previousPosition - currentBody.m_position;
-                if (difVector.GetLengthSqr() > 1e-9f) // Optimized float check
-                    mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+                // PERFORMANCE HIT: Updating ALL bodies for EVERY contact
+                for (auto& currentBody : mBodies) {
+                    // position update
+                    const auto previousPosition = currentBody.m_position;
+                    currentBody.Update(deltaTime);
+
+                    // Flagging dirty frames
+                    auto difVector = previousPosition - currentBody.m_position;
+                    if (difVector.GetLengthSqr() > 1e-9f) // Optimized float check
+                        mAllRitems[currentBody.m_id].get()->NumFramesDirty = gNumFrameResources;
+                }
+
+                ResolveContact(contact);
+                accumulatedTime += deltaTime;
             }
-
-            ResolveContact(contact);
-            accumulatedTime += deltaTime;
         }
     }
-    PIXEndEvent();  // End Physics_Step3_Solver
 
 
-    // PIX - 4. State-Update Marker
-    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step4_StateUpdate");
+    // PIX - 3. State-Update Marker
     // update the positions for the rest of this frame's time
     {
+        SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step3_StateUpdate");
         const float timeRemaining = deltaSecond - accumulatedTime;
         if (timeRemaining > 0.0f) {
             for (auto& currentBody : mBodies) {
@@ -1080,12 +1100,11 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
             }
         }
     }
-    PIXEndEvent();  // End Physics_Step4_StateUpdate
 
 
-    // PIX - 5. Render-Sync Marker
-    PIXBeginEvent(PIX_COLOR_DEFAULT, "Physics_Step5_RenderSync");
+    // PIX - 4. Render-Sync Marker
     {
+        SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step4_RenderSync");
         // redraw items that are related to constraints or manifolds
         for (auto* currentConstraint : mConstraints) {
             mAllRitems[currentConstraint->m_bodyA->m_id]->NumFramesDirty = gNumFrameResources;
@@ -1116,9 +1135,6 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
         }
         SaveCurrentFrameState();
     }
-    PIXEndEvent();  // End Physics_Step5_RenderSync
-
-    PIXEndEvent(); // End Physics_Main_Loop
 }
 
 // another physics method for picked item

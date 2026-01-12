@@ -430,20 +430,27 @@ bool D3DApp::InitMainWindow()
 
 bool D3DApp::InitDirect3D()
 {
-#if defined(DEBUG) || defined(_DEBUG) 
-	// Enable the D3D12 debug layer.
-{
-	ComPtr<ID3D12Debug> debugController;
-	ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
-	debugController->EnableDebugLayer();
-
-	if (GetModuleHandle(L"WinPixGpuCapturer.dll") == nullptr)
+// 1. enables D3D12 debug layer (use this for debug mode only since it decreases the performance a lot 
+#if defined(DEBUG) || defined(_DEBUG)
 	{
-		PIXLoadLatestWinPixGpuCapturerLibrary();
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		{
+			debugController->EnableDebugLayer();
+		}
 	}
-}
 #endif
 
+// 2. enables PIX capture library
+#if !defined(SHIPPING) 
+	{
+		// load dll
+		if (GetModuleHandle(L"WinPixGpuCapturer.dll") == nullptr)
+		{
+			PIXLoadLatestWinPixGpuCapturerLibrary();
+		}
+	}
+#endif
 	ThrowIfFailed(CreateDXGIFactory1(IID_PPV_ARGS(&mdxgiFactory)));
 
 	// Try to create hardware device.
