@@ -1,6 +1,7 @@
 //
 //  GJK.cpp
 //
+#include "PCH.h"
 #include "GJK.h"
 
 struct point_t;
@@ -452,7 +453,15 @@ bool DoesIntersect_GJK(const Body* bodyA, const Body* bodyB, const float bias, V
 	float currentClosestDistance = 1e10f;
 	bool doesContainOrigin = false;
 	Vec3 newDir = simplexPoints[0].xyz * -1.0f;
+
+	// 
+	// TODO: temporary fix (remove this logic after applying optimization)
+	unsigned currentIterationCount = 0;
+	const unsigned MAX_ITERATION_COUNT = 9;
 	do {
+		if (currentIterationCount > MAX_ITERATION_COUNT)
+			break;
+
 		// Get the new point to check on
 		point_t newPoint = GetSupportPoint(bodyA, bodyB, newDir, 0.0f);
 
@@ -484,6 +493,8 @@ bool DoesIntersect_GJK(const Body* bodyA, const Body* bodyB, const float bias, V
 		SortValidSupportPoints(simplexPoints, lambdas);
 		numberOfTotalPoints = GetNumberOfValidPoints(lambdas);
 		doesContainOrigin = (4 == numberOfTotalPoints);
+
+		++currentIterationCount;
 	} while (!doesContainOrigin);
 
 	// Exit if there's no collision

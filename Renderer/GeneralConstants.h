@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 
 namespace GeneralData {
 const int NumFrameResources = 3;

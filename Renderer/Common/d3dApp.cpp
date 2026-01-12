@@ -2,9 +2,8 @@
 // d3dApp.cpp by Frank Luna (C) 2015 All Rights Reserved.
 //***************************************************************************************
 
+#include "PCH.h"
 #include "d3dApp.h"
-#include <WindowsX.h>
-// debugging
 
 #include "../GeneralConstants.h"
 

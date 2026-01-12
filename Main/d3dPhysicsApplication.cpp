@@ -1,11 +1,6 @@
-﻿#define NOMINMAX 
+﻿#include "PCH.h"
 #include "d3dPhysicsApplication.h"
-#include "../Renderer/imgui/imgui_internal.h"
-#include "../Renderer/imgui/ImGuizmo.h"
 
-#include <iomanip>
-#include <map>
-#include <vector>
 
 const int gNumFrameResources = GeneralData::NumFrameResources;
 

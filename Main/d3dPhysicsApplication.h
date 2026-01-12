@@ -1,8 +1,6 @@
 #pragma once
 
 // renderer
-#include "Windows.h"
-#include "windowsx.h"
 #include "../Renderer/Common/d3dApp.h"
 #include "../Renderer/Common/MathHelper.h"
 #include "../Renderer/Common/UploadBuffer.h"
@@ -11,7 +9,6 @@
 #include "../Renderer/FrameResource.h"
 #include "../Renderer/GeneralConstants.h"
 #include "../Renderer/ShadowMap.h"
-#include "../Renderer/imgui/ImGuizmo.h"
 
 // physics
 #include "../Physics/Body.h"
@@ -21,26 +18,15 @@
 #include "../Physics/GJK.h"
 #include "../Physics/Intersections.h"
 #include "../Physics/Manifold.h"
-#include "../Physics/Shapes.h"
 
 // scene management
 #include "../Renderer/StateData.h"
 #include "../Main/SceneConfiguration.h"
 
+
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 using namespace DirectX::PackedVector;
-
-#pragma comment(lib, "d3dcompiler.lib")
-#pragma comment(lib, "D3D12.lib")
-
-
-// frame controller
-#include <unordered_map>
-#include <deque>
-
-// wire frame
-#include <unordered_set>
 
 
 // A structure to hold an object's complete state

@@ -1,3 +1,4 @@
+#include "PCH.h"
 #include "d3dPhysicsApplication.h"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,

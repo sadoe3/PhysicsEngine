@@ -14,10 +14,6 @@
 
 #pragma once
 
-#include <cstdint>
-#include <DirectXMath.h>
-#include <vector>
-
 #include "../../Physics/Shapes/ShapeConvex.h"
 
 class GeometryGenerator

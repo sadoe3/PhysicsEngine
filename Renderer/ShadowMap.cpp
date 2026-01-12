@@ -2,6 +2,7 @@
 // ShadowMap.cpp by Frank Luna (C) 2011 All Rights Reserved.
 //***************************************************************************************
 
+#include "PCH.h"
 #include "ShadowMap.h"
  
 ShadowMap::ShadowMap(ID3D12Device* device, UINT width, UINT height)

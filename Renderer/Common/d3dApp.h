@@ -4,26 +4,9 @@
 
 #pragma once
 
-#if defined(DEBUG) || defined(_DEBUG)
-#define _CRTDBG_MAP_ALLOC
-#include <crtdbg.h>
-#endif
-
 #include "d3dUtil.h"
 #include "GameTimer.h"
 
-// Link necessary d3d12 libraries.
-#pragma comment(lib,"d3dcompiler.lib")
-#pragma comment(lib, "D3D12.lib")
-#pragma comment(lib, "dxgi.lib")
-
-// imgui
-#include "../../renderer/imgui/imgui.h"
-#include "../../renderer/imgui/imgui_impl_win32.h"
-#include "../../renderer/imgui/imgui_impl_dx12.h"
-
-// pix
-#include <pix3.h>
 
 class D3DApp
 {

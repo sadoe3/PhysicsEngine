@@ -2,12 +2,7 @@
 //	GJK.h
 //
 #pragma once
-#include "../Math/Vector.h"
-#include "../Math/Quat.h"
-#include "../Math/Matrix.h"
-#include "../Math/Bounds.h"
 #include "Body.h"
-#include "Shapes.h"
 
 bool DoesIntersect_GJK( const Body * bodyA, const Body * bodyB );
 bool DoesIntersect_GJK( const Body * bodyA, const Body * bodyB, const float bias, Vec3 & ptOnA, Vec3 & ptOnB );

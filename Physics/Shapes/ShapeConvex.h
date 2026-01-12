@@ -4,10 +4,7 @@
 #pragma once
 #include "ShapeBase.h"
 
-/*
-Random Number Generator
-*/
-#include <random>
+
 class Random {
 public:
 	static float Get() { return m_distribution(m_engine); }
