@@ -102,7 +102,7 @@ float3 NormalSampleToWorldSpace(float3 normalMapSample, float3 unitNormalW, floa
 }
 
 //---------------------------------------------------------------------------------------
-// PCF for shadow mapping. (With Depth Bias fix)
+// PCF for shadow mapping. (Revised with Tuned Bias)
 //---------------------------------------------------------------------------------------
 float CalcShadowFactor(float4 shadowPosH)
 {
@@ -112,16 +112,45 @@ float CalcShadowFactor(float4 shadowPosH)
     // Depth in NDC space.
     float depth = shadowPosH.z;
 
-    // FIX: Apply a depth bias to combat Shadow Acne (self-shadowing).
-    // Adjust this value (0.001f to 0.005f) based on scene scale if artifacts persist.
-    const float depthBias = 0.005f; 
+    // ------------------------------------------------------------------
+    // FIX 1: Texture Bounds Check
+    // If the pixel is outside the shadow map's view volume (UVs < 0 or > 1),
+    // we should consider it 'Lit' (1.0) instead of 'Shadowed'.
+    // This fixes the dark artifacts on the far sides of your large floor.
+    // ------------------------------------------------------------------
+    if (shadowPosH.x < 0.0f || shadowPosH.x > 1.0f ||
+        shadowPosH.y < 0.0f || shadowPosH.y > 1.0f ||
+        depth < 0.0f || depth > 1.0f)
+    {
+        return 1.0f;
+    }
+
+    // ------------------------------------------------------------------
+    // FIX 2: Tuned Slope-Scaled Bias
+    // We calculate how fast the depth changes in screen space (ddx/ddy).
+    // This automatically creates a larger bias for steep slopes (the sphere edges)
+    // and a smaller bias for flat surfaces, fixing the grid/stripe acne.
+    // ------------------------------------------------------------------
+    float3 d1 = ddx(shadowPosH.xyz);
+    float3 d2 = ddy(shadowPosH.xyz);
+    float z_slope = sqrt(d1.z * d1.z + d2.z * d2.z);
+    
+    // --- TWEAKABLE VALUES ---
+    // If stripes remain, slightly increase 'baseBias'.
+    // If the shadow creates a gap (floating/detached), decrease 'maxBias'.
+    const float baseBias   = 0.002f; // Previously 0.0001f (Too low)
+    const float slopeScale = 4.0f;   // Strength of slope reaction
+    const float maxBias    = 0.01f;  // Limit the maximum bias
+    
+    // Calculate final bias with limits
+    float depthBias = baseBias + (z_slope * slopeScale);
+    depthBias = min(depthBias, maxBias); 
+
     depth -= depthBias;
     depth = saturate(depth);
     
     uint width, height, numMips;
     gShadowMap.GetDimensions(0, width, height, numMips);
-
-    // Texel size.
     float dx = 1.0f / (float)width;
 
     float percentLit = 0.0f;

@@ -22,7 +22,6 @@ int CompareContacts(const void* contactA, const void* contactB) {
 		return 1;
 }
 
-
 /*
 ====================================================
 ResolveContact

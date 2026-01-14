@@ -4,15 +4,18 @@
 #include "../Physics/Constraints.h"
 
 int AddSpheres(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex
-	, const unsigned stressLevel, const float startHeight) {
+	, const int stressLevel, const float startHeight, bool isDense) {
 	Body body;
 	int lastIndex = startIndex;
 
-	for (unsigned x = 1; x <= stressLevel; ++x) {
-		for (unsigned y = 1; y <= stressLevel; ++y) {
+	float positionOffset = 2.0f;
+	if (isDense == false)
+		positionOffset = 30.0f;
+	for (int x = 1; x <= stressLevel; ++x) {
+		for (int y = 1; y <= stressLevel; ++y) {
 			float radius = 0.5f;
-			float xx = float(x - 1) * radius * 2.0f;
-			float yy = float(y - 1) * radius * 2.0f;
+			float xx = float(x - (stressLevel/2.0f)) * radius * positionOffset;
+			float yy = float(y - (stressLevel/2.0f)) * radius * positionOffset;
 			body.m_position = Vec3(xx, yy, startHeight);
 			body.m_orientation = Quat(0, 0, 0, 1);
 			body.m_linearVelocity.Zero();
@@ -35,15 +38,18 @@ int AddSpheres(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, 
 	return lastIndex;
 }
 int AddDiamonds(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex
-	, const unsigned stressLevel, const float startHeight) {
+	, const int stressLevel, const float startHeight, bool isDense) {
 	Body body;
 	int lastIndex = startIndex;
 
-	for (unsigned x = 1; x <= stressLevel; ++x) {
-		for (unsigned y = 1; y <= stressLevel; ++y) {
-			float radius = 0.5f;
-			float xx = float(x - 1) * radius * 4.5f;
-			float yy = float(y - 1) * radius * 4.5f;
+	float positionOffset = 2.0f;
+	if (isDense == false)
+		positionOffset = 15.0f;
+	for (int x = 1; x <= stressLevel; ++x) {
+		for (int y = 1; y <= stressLevel; ++y) {
+			float gap = 1.0f;
+			float xx = float(x - (stressLevel / 2.0f)) * gap * positionOffset;
+			float yy = float(y - (stressLevel / 2.0f)) * gap * positionOffset;
 			body.m_position = Vec3(xx, yy, startHeight);
 			body.m_orientation = Quat(0, 0, 0, 1);
 			body.m_linearVelocity.Zero();
@@ -65,13 +71,15 @@ int AddDiamonds(std::vector< Body >& bodies, std::vector<std::pair<unsigned int,
 
 	return lastIndex;
 }
-int AddFloor(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex) {
+int AddFloor(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex, bool isDense) {
 	Body body;
 	int lastIndex = startIndex;
 
+	float radius = 80.0f;
+	if (isDense == false)
+		radius *= 2;
 	for (unsigned x = 0; x < 3; ++x) {
 		for (unsigned y = 0; y < 3; ++y) {
-			float radius = 80.0f;
 			float xx = float(x - 1) * radius * 0.25f;
 			float yy = float(y - 1) * radius * 0.25f;
 			body.m_position = Vec3(xx - 5.0f, yy - 5.0f, -radius);

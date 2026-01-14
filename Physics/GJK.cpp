@@ -456,11 +456,11 @@ bool DoesIntersect_GJK(const Body* bodyA, const Body* bodyB, const float bias, V
 
 	// 
 	// TODO: temporary fix (remove this logic after applying optimization)
-	unsigned currentIterationCount = 0;
-	const unsigned MAX_ITERATION_COUNT = 9;
+	//unsigned currentIterationCount = 0;
+	//const unsigned MAX_ITERATION_COUNT = 9;
 	do {
-		if (currentIterationCount > MAX_ITERATION_COUNT)
-			break;
+		//if (currentIterationCount > MAX_ITERATION_COUNT)
+		//	break;
 
 		// Get the new point to check on
 		point_t newPoint = GetSupportPoint(bodyA, bodyB, newDir, 0.0f);
@@ -494,7 +494,7 @@ bool DoesIntersect_GJK(const Body* bodyA, const Body* bodyB, const float bias, V
 		numberOfTotalPoints = GetNumberOfValidPoints(lambdas);
 		doesContainOrigin = (4 == numberOfTotalPoints);
 
-		++currentIterationCount;
+		//++currentIterationCount;
 	} while (!doesContainOrigin);
 
 	// Exit if there's no collision
@@ -628,7 +628,20 @@ Vec3 GetBarycentricCoordinates(Vec3 s1, Vec3 s2, Vec3 s3, const Vec3& targetPoin
 	s3 = s3 - targetPoint;
 
 	Vec3 normal = (s2 - s1).Cross(s3 - s1);
-	Vec3 projectedPA = normal * s1.Dot(normal) / normal.GetLengthSqr(); // project the vector from targetPoint to s1 onto the normal
+
+	// [Safety Fix] Check for degenerate triangles.
+	// If the vertices are collinear or very close to each other, the normal's length will be near zero.
+	// Dividing by this small value causes numerical instability (NaN) or crashes (Division by Zero).
+	float normalLengthSqr = normal.GetLengthSqr();
+	const float EPSILON = 1e-8f;
+
+	if (normalLengthSqr < EPSILON) {
+		// Fallback: The triangle is invalid. We return a dummy value (e.g., 100% weight on vertex A).
+		// This prevents the crash and allows the simulation to continue, likely resolving in the next frame.
+		return Vec3(1.0f, 0.0f, 0.0f);
+	}
+
+	Vec3 projectedPA = normal * s1.Dot(normal) / normalLengthSqr; // project the vector from targetPoint to s1 onto the normal
 
 	// Find the axis with the greatest projected area
 	int targetAxis = 0;
@@ -677,6 +690,7 @@ Vec3 GetBarycentricCoordinates(Vec3 s1, Vec3 s2, Vec3 s3, const Vec3& targetPoin
 	Vec3 lambdas = areas / maxArea;
 	if (!lambdas.IsValid())
 		lambdas = Vec3(1, 0, 0);
+
 	return lambdas;
 }
 
@@ -858,7 +872,7 @@ float Expand_EPA(const Body* bodyA, const Body* bodyB, const float bias, const p
 	}
 	centerPoint *= 0.25f;
 
-	// Build the triangles
+	// Build the initial triangles from the simplex
 	for (int currentVertex = 0; currentVertex < 4; ++currentVertex) {
 		int vertexA = (currentVertex + 1) % 4;
 		int vertexB = (currentVertex + 2) % 4;
@@ -871,35 +885,45 @@ float Expand_EPA(const Body* bodyA, const Body* bodyB, const float bias, const p
 		float distance = GetSignedDistanceFromPointToTriangle(currentTriangle, points[unusedPoint].xyz, points);
 
 		// The unused point is always on the negative/inside of the triangle.. make sure the normal points away
-		if (distance > 0.0f) 
+		if (distance > 0.0f)
 			std::swap(currentTriangle.a, currentTriangle.b);
 
 		triangles.push_back(currentTriangle);
 	}
 
-	//
-	//	Expand the simplex to find the closest face of the CSO to the origin
-	//
-	while (true) {
+	// [Safety Fix] Limit the number of iterations to prevent infinite loops.
+	// In stress tests with many objects, floating-point errors can cause EPA to loop forever.
+	// 32 to 64 iterations are usually sufficient for high precision.
+	const int EPA_MAX_ITERATIONS = 64;
+	const float EPA_TOLERANCE = 0.0001f; // Threshold for small expansions
+
+	for (int iteration = 0; iteration < EPA_MAX_ITERATIONS; ++iteration) {
 		const int closestTriangleIndex = GetClosestTriangleToOrigin(triangles, points);
+
+		// [Safety Fix] Ensure the index is valid.
+		if (closestTriangleIndex < 0 || closestTriangleIndex >= triangles.size()) {
+			break;
+		}
+
 		Vec3 normal = GetNormalOfTriangle(triangles[closestTriangleIndex], points);
 		const point_t newSupportPoint = GetSupportPoint(bodyA, bodyB, normal, bias);
 
-		// if w already exists, then just stop
-		// because it means we can't expand any further
-		if (IsAlreadyAdded(newSupportPoint.xyz, triangles, points)) 
+		// If the point already exists, we can't expand further.
+		if (IsAlreadyAdded(newSupportPoint.xyz, triangles, points))
 			break;
 
 		float distance = GetSignedDistanceFromPointToTriangle(triangles[closestTriangleIndex], newSupportPoint.xyz, points);
-		if (distance <= 0.0f) 
-			break;	// can't expand
+
+		// [Safety Fix] If the expansion distance is negligible, stop to save performance and prevent errors.
+		if (distance <= EPA_TOLERANCE)
+			break;
 
 		const int newSupportPointIndex = (int)points.size();
 		points.push_back(newSupportPoint);
 
 		// Remove Triangles that face this point
 		int numOfRemovedTriangles = RemoveTrianglesFacingPoint(newSupportPoint.xyz, triangles, points);
-		if (0 == numOfRemovedTriangles) 
+		if (0 == numOfRemovedTriangles)
 			break;
 
 		// Find Dangling Edges
@@ -908,10 +932,7 @@ float Expand_EPA(const Body* bodyA, const Body* bodyB, const float bias, const p
 		if (0 == danglingEdges.size())
 			break;
 
-
-		// In theory the edges should be a proper CCW order
-		// So we only need to add the new point as 'a' in order
-		// to create new triangles that face away from origin
+		// Reconstruct the polytope with new triangles
 		for (int currentEdgeIndex = 0; currentEdgeIndex < danglingEdges.size(); ++currentEdgeIndex) {
 			const edge_t& currentEdge = danglingEdges[currentEdgeIndex];
 
@@ -922,19 +943,30 @@ float Expand_EPA(const Body* bodyA, const Body* bodyB, const float bias, const p
 
 			// Make sure it's oriented properly
 			float distance = GetSignedDistanceFromPointToTriangle(currentTriangle, centerPoint, points);
-			if (distance > 0.0f) 
+			if (distance > 0.0f)
 				std::swap(currentTriangle.b, currentTriangle.c);
 
 			triangles.push_back(currentTriangle);
 		}
 	}
 
+	// [Safety Fix] If something went wrong and we have no triangles left, return 0 depth.
+	if (triangles.empty())
+		return 0.0f;
+
 	// Get the projection of the origin on the closest triangle
 	const int closestTriangleIndex = GetClosestTriangleToOrigin(triangles, points);
+
+	// [Safety Fix] Ensure index is valid before access
+	if (closestTriangleIndex < 0) 
+		return 0.0f;
+
 	const tri_t& closestTriangle = triangles[closestTriangleIndex];
 	Vec3 triangleVertexA = points[closestTriangle.a].xyz;
 	Vec3 triangleVertexB = points[closestTriangle.b].xyz;
 	Vec3 triangleVertexC = points[closestTriangle.c].xyz;
+
+	// Calculate barycentric coordinates using the robust version
 	Vec3 lambdas = GetBarycentricCoordinates(triangleVertexA, triangleVertexB, triangleVertexC, Vec3(0.0f));
 
 	// Get the point on shape A

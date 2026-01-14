@@ -121,7 +121,7 @@ void ConstraintPenetration::PreSolve(const float deltaSecond) {
 
 /*
 ================================
-ConstraintPenetration::PreSolve
+ConstraintPenetration::Solve
 ================================
 */
 void ConstraintPenetration::Solve() {
@@ -141,30 +141,28 @@ void ConstraintPenetration::Solve() {
 	// Solve for the Lagrange multipliers
 	VecN currentMultipliers = Solve_LCP_GaussSeidel(lhs, rhs);
 
-
 	// Accumulate the impulses and clamp to within the constraint limits
 	VecN previousAccumulatedMultipliers = m_cachedLagrange;
 	m_cachedLagrange += currentMultipliers;
+
+	// Clamp total normal impulse 
 	const float lambdaLimit = 0.0f;
 	if (m_cachedLagrange[0] < lambdaLimit) 
 		m_cachedLagrange[0] = lambdaLimit;
 
 	if (m_friction > 0.0f) {
-		// two possible limit value
-		const float gravityBasedLimit = m_friction * 10.0f * 1.0f / (m_bodyA->m_invMass + m_bodyB->m_invMass);
-		const float normalBasedLimit = fabsf(currentMultipliers[0] * m_friction);
-		const float maxForce = (gravityBasedLimit > normalBasedLimit) ? gravityBasedLimit : normalBasedLimit;
+		// Fix
+		// Max friction = m_friction * m_cachedLagrange[0] (total normal impulse)
+		// currentMultipliers should not be utilized for this
+		const float maxFriction = m_cachedLagrange[0] * m_friction;
 
-		if (m_cachedLagrange[1] > maxForce) 
-			m_cachedLagrange[1] = maxForce;
-		if (m_cachedLagrange[1] < -maxForce) 
-			m_cachedLagrange[1] = -maxForce;
+		// Tangent U (rows[1])
+		if (m_cachedLagrange[1] > maxFriction) m_cachedLagrange[1] = maxFriction;
+		if (m_cachedLagrange[1] < -maxFriction) m_cachedLagrange[1] = -maxFriction;
 
-
-		if (m_cachedLagrange[2] > maxForce) 
-			m_cachedLagrange[2] = maxForce;
-		if (m_cachedLagrange[2] < -maxForce) 
-			m_cachedLagrange[2] = -maxForce;
+		// Tangent V (rows[2])
+		if (m_cachedLagrange[2] > maxFriction) m_cachedLagrange[2] = maxFriction;
+		if (m_cachedLagrange[2] < -maxFriction) m_cachedLagrange[2] = -maxFriction;
 	}
 	// Modify currentMultipliers regarding the limit values
 	currentMultipliers = m_cachedLagrange - previousAccumulatedMultipliers;

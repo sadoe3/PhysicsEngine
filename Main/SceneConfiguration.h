@@ -2,12 +2,13 @@
 #include "../Physics/Body.h"
 #include "../Physics/Constraints.h"
 
-// todo
+
 int AddSpheres(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex
-	,const unsigned stressLevel, const float startHeight);
+	,const int stressLevel, const float startHeight, bool isDense);
 int AddDiamonds(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex
-	,const unsigned stressLevel, const float startHeight);
-int AddFloor(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex);
+	,const int stressLevel, const float startHeight, bool isDense);
+int AddFloor(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex
+	, bool isDense);
 
 int AddStack(std::vector< Body >& bodies, std::vector<std::pair<unsigned int, unsigned int>>& indices, const int startIndex);
 int AddMover(std::vector< Body >& bodies, std::vector<Constraint*>& constraints

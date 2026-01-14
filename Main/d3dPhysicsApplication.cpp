@@ -944,7 +944,7 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
     // PIX - 1. Collision-Detection Marker
     {
         SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step1_BroadNarrowPhase");
-        if (mIsBroadNarrowOn == true) {
+        if (mIsBroadOptimized == true) {
             // BroadPhase
             std::vector<collisionPair_t> collisionPairs;
             {
@@ -1014,9 +1014,9 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
     {
         SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Solver");
 
-        // sort times of impact
+        // sort contacts by times of impact
         {
-            SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub1_SortTOI");
+            SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub1_SortContactsByTOI");
 
             if (contacts.size() > 1)
                 std::sort(contacts.begin(), contacts.end(), [](const contact_t& a, const contact_t& b) {
@@ -1025,7 +1025,7 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
         }
 
 
-        // resolve constraints
+        // resolve constraints and static conatct (manifolds)
         {
             SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Step2_Sub2_ResolveConstraints");
 
@@ -1038,7 +1038,8 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
 
             {
                 SetCPUStat(PIX_COLOR_DEFAULT, "Physics_Solve");
-                const int maxIterationCount = 5;
+                // tradeoff : high for stability, low for performance
+                const int maxIterationCount = 8;
                 // apply iterative approach
                 for (int i = 0; i < maxIterationCount; ++i) {
                     for (auto* currentConstraint : mConstraints)
@@ -1055,7 +1056,7 @@ void PhysicsApplication::UpdatePositionAndOrientation(const float deltaSecond) {
             }
         }
 
-        // resolve collisions
+        // resolve dynamic collision (contacts)
         // note that there's no recalculation of earlier collisions for later ones to improve performance.
         // thus, while the first collision is handled correctly, later collisions may be processed improperly if they are related to the earlier collisions.
         {
@@ -1328,7 +1329,6 @@ void PhysicsApplication::CleanupSceneResources() {
 
     // reset flags
     mIsHitResultVisible = true;
-    mIsBroadNarrowOn = true;
 }
 
 // draw
@@ -2391,20 +2391,23 @@ void PhysicsApplication::RenderDemoUIStressTest() {
         ImGui::DockBuilderAddNode(myDockspaceId, ImGuiDockNodeFlags_NoResize);
         ImGui::DockBuilderSetNodeSize(myDockspaceId, panelSize);
 
-        ImGuiID dockIdA, dockIdB, dockIdC, dockIdD, dockIdE, dockIdF;
-        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.30f, &dockIdA, &myDockspaceId);
-        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.18f, &dockIdB, &myDockspaceId);
+        ImGuiID dockIdA, dockIdB, dockIdC, dockIdD, dockIdE, dockIdF, dockIdG;
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.25f, &dockIdA, &myDockspaceId);
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.14f, &dockIdB, &myDockspaceId);
         ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.22f, &dockIdC, &myDockspaceId);
-        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.40f, &dockIdD, &myDockspaceId);
-        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.53f, &dockIdE, &myDockspaceId);
-        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.40f, &dockIdF, &myDockspaceId);
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.29f, &dockIdD, &myDockspaceId);
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.29f, &dockIdE, &myDockspaceId);
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.43f, &dockIdF, &myDockspaceId);
+        ImGui::DockBuilderSplitNode(myDockspaceId, ImGuiDir_Up, 0.07f, &dockIdG, &myDockspaceId);
 
         ImGui::DockBuilderDockWindow("Performance Monitor", dockIdA);
         ImGui::DockBuilderDockWindow("Frame Controller", dockIdB);
-        ImGui::DockBuilderDockWindow("Optimization", dockIdC);
+        ImGui::DockBuilderDockWindow("Scene Setup", dockIdC);
         ImGui::DockBuilderDockWindow("Shape", dockIdD);
         ImGui::DockBuilderDockWindow("Stress Level", dockIdE);
         ImGui::DockBuilderDockWindow("Height", dockIdF);
+        ImGui::DockBuilderDockWindow("Optimization", dockIdG);
+
 
         ImGui::DockBuilderFinish(myDockspaceId);
     }
@@ -2419,12 +2422,13 @@ void PhysicsApplication::RenderDemoUIStressTest() {
     ImGui::Begin("Performance Monitor");
     CalculateAndDisplayFPS(mTimer.DeltaTime());
     ImGui::Text("FPS: %.0f", mAverageFPS);
-    ImGui::PlotLines("##frametime", mHistoryFPS, GeneralData::GUI::HistorySize, mHistoryIndex, "FPS", 10.0f, 60.0f, ImVec2(0, 80));
+    ImGui::PlotLines("##frametime", mHistoryFPS, GeneralData::GUI::HistorySize, mHistoryIndex, "FPS", 10.0f, 60.0f, ImVec2(-FLT_MIN, 80));
     ImGui::End();
 
     // Frame Controller
     ImGui::Begin("Frame Controller");
     if (mAppPaused == true) {
+        ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::SliderInt("##Controller", &mCurrentFrameHistoryIndex, 1, GeneralData::GUI::MaxFrameHistorySize > static_cast<int>(mFrameHistory.size())
             ? static_cast<int>(mFrameHistory.size()) : GeneralData::GUI::MaxFrameHistorySize)) {
             LoadFrameState(mCurrentFrameHistoryIndex - 1);
@@ -2434,10 +2438,23 @@ void PhysicsApplication::RenderDemoUIStressTest() {
     }
     ImGui::End();
 
+    // Scene Setup
+    ImGui::Begin("Scene Setup");
+    std::string nameIsOnOff = (mIsStressTestSceneDense ? "On" : "Off");
+    if (ImGui::Button(("Dense: " + nameIsOnOff).c_str())) {
+        mIsStressTestSceneDense = true;
+        mIsRestartNeeded = true;
+    }
+    nameIsOnOff = (mIsStressTestSceneDense == false ? "On" : "Off");
+    if (ImGui::Button(("Sparse: " + nameIsOnOff).c_str())) {
+        mIsStressTestSceneDense = false;
+        mIsRestartNeeded = true;
+    }
+    ImGui::End();
 
     // Shape
     ImGui::Begin("Shape");
-    std::string nameIsOnOff = (mIsStressTestShapeSphere ? "On" : "Off");
+    nameIsOnOff = (mIsStressTestShapeSphere ? "On" : "Off");
     if (ImGui::Button(("Sphere: " + nameIsOnOff).c_str())) {
         mIsStressTestShapeSphere = true;
         mIsRestartNeeded = true;
@@ -2451,6 +2468,7 @@ void PhysicsApplication::RenderDemoUIStressTest() {
 
     // Stress Level
     ImGui::Begin("Stress Level");
+    ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::SliderInt("##Stress Level", &mStressLevel, 1, 10);
     if (ImGui::IsItemActive())
         mIsSliderMoving = true;
@@ -2458,9 +2476,10 @@ void PhysicsApplication::RenderDemoUIStressTest() {
         mIsRestartNeeded = true;
     ImGui::End();
 
-    // Start Height
+    // Initial Height
     if (mAppPaused == true) {
         ImGui::Begin("Height");
+        ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::SliderFloat("##Height", &mStressStartHeight, 5.0f, 20.0f);
         if (ImGui::IsItemActive())
             mIsSliderMoving = true;
@@ -2471,9 +2490,14 @@ void PhysicsApplication::RenderDemoUIStressTest() {
 
     // Optimization
     ImGui::Begin("Optimization");
-    nameIsOnOff = (mIsBroadNarrowOn ? "On" : "Off");
-    if (ImGui::Button(("Broad/Narrow: " + nameIsOnOff).c_str())) {
-        mIsBroadNarrowOn = !mIsBroadNarrowOn;
+    nameIsOnOff = (mIsBroadOptimized ? "On" : "Off");
+    if (ImGui::Button(("BroadPhase: " + nameIsOnOff).c_str())) {
+        mIsBroadOptimized = !mIsBroadOptimized;
+        mIsRestartNeeded = true;
+    }
+    nameIsOnOff = (mIsNarrowOptimized ? "On" : "Off");
+    if (ImGui::Button(("NarrowPhase: " + nameIsOnOff).c_str())) {
+        mIsNarrowOptimized = !mIsNarrowOptimized;
         mIsRestartNeeded = true;
     }
     ImGui::End();
@@ -2531,12 +2555,13 @@ void PhysicsApplication::RenderDemoUISandBox() {
     ImGui::Begin("Performance Monitor");
     CalculateAndDisplayFPS(mTimer.DeltaTime());
     ImGui::Text("FPS: %.0f", mAverageFPS);
-    ImGui::PlotLines("##frametime", mHistoryFPS, GeneralData::GUI::HistorySize, mHistoryIndex, "FPS", 10.0f, 60.0f, ImVec2(0, 80));
+    ImGui::PlotLines("##frametime", mHistoryFPS, GeneralData::GUI::HistorySize, mHistoryIndex, "FPS", 10.0f, 60.0f, ImVec2(-FLT_MIN, 80));
     ImGui::End();
 
     // Frame Controller
     ImGui::Begin("Frame Controller");
     if (mAppPaused == true) {
+        ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::SliderInt("##Controller", &mCurrentFrameHistoryIndex, 1, GeneralData::GUI::MaxFrameHistorySize > static_cast<int>(mFrameHistory.size())
             ? static_cast<int>(mFrameHistory.size()) : GeneralData::GUI::MaxFrameHistorySize)) {
             LoadFrameState(mCurrentFrameHistoryIndex - 1);
@@ -2714,20 +2739,20 @@ void PhysicsApplication::SetupDemoSceneSandbox(GeometryGenerator& geometryGenera
 
 // specific setup : stress test
 void PhysicsApplication::SetupDemoSceneSpheres(GeometryGenerator& geometryGenerator) {
-    int lastIndex = AddSpheres(mBodies, geometryStartEndIndices, 0, mStressLevel, mStressStartHeight);
+    int lastIndex = AddSpheres(mBodies, geometryStartEndIndices, 0, mStressLevel, mStressStartHeight, mIsStressTestSceneDense);
     BuildGeometrySpheres(geometryGenerator);
 
     BuildRenderItemsStressTest(geometryGenerator, lastIndex);
 }
 void PhysicsApplication::SetupDemoSceneDiamonds(GeometryGenerator& geometryGenerator) {
-    int lastIndex = AddDiamonds(mBodies, geometryStartEndIndices, 0, mStressLevel, mStressStartHeight);
+    int lastIndex = AddDiamonds(mBodies, geometryStartEndIndices, 0, mStressLevel, mStressStartHeight, mIsStressTestSceneDense);
     BuildGeometryDiamonds(geometryGenerator);
 
     BuildRenderItemsStressTest(geometryGenerator, lastIndex);
 }
 
 void PhysicsApplication::BuildRenderItemsStressTest(GeometryGenerator& geometryGenerator, int lastIndex) {
-    lastIndex = AddFloor(mBodies, geometryStartEndIndices, lastIndex);
+    lastIndex = AddFloor(mBodies, geometryStartEndIndices, lastIndex, mIsStressTestSceneDense);
     BuildGeometryFloor(geometryGenerator);
 
     XMMATRIX textureTransform = XMMatrixScaling(1.0f, 1.0f, 1.0f);

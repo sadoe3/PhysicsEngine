@@ -387,9 +387,10 @@ private:
 public:
     // scene related values
     SandboxState mSandboxState = SandboxState::STACK;
-    bool mIsBroadNarrowOn = true;
-
+    bool mIsBroadOptimized = true;
+    bool mIsNarrowOptimized = true;
     bool mIsStressTestShapeSphere = true;
+    bool mIsStressTestSceneDense = true;
     int mStressLevel = 6;
     float mStressStartHeight = 10.0f;
 };

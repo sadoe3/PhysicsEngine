@@ -19,8 +19,8 @@ namespace GUI {
 	const int NumSrvDescriptorsImGui = 64;
 	const int HistorySize = 60; // fps
 	const int MaxFrameHistorySize = 120;
-	const int PanelWidth = 250;
-	const int PanelHeightStressTest = 477;
+	const int PanelWidth = 190;
+	const int PanelHeightStressTest = 585;
 	const int PanelHeightSandbox = 500;
 }
 
