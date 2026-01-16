@@ -5,7 +5,6 @@
 #include "Broadphase.h"
 
 
-
 int CompareSAP(const void* lhs, const void* rhs) {
 	const psuedoBody_t* left = reinterpret_cast<const psuedoBody_t*>(lhs);
 	const psuedoBody_t* right = reinterpret_cast<const psuedoBody_t*>(rhs);
@@ -126,13 +125,13 @@ void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const psuedoBody_t
     }
 }
 void SweepAndPrune1D(const Body* bodies, const int numBodies, std::vector<collisionPair_t>& finalPairs, const float deltaSecond) {
-    // Allocate space on the stack for 2 endpoints per body.
-    psuedoBody_t* sortedBodies = reinterpret_cast<psuedoBody_t*>(alloca(sizeof(psuedoBody_t) * numBodies * 2));
+    // reserve space on the stack for 2 endpoints per body.
+    std::vector<psuedoBody_t> sortedBodies(numBodies * 2);
 
-    SortBodiesBounds(bodies, numBodies, sortedBodies, deltaSecond);
+    SortBodiesBounds(bodies, numBodies, sortedBodies.data(), deltaSecond);
 
     // The core issue was here: BuildPairs was doing an O(N^2) scan instead of using the Active List.
-    BuildPairs(finalPairs, sortedBodies, numBodies);
+    BuildPairs(finalPairs, sortedBodies.data(), numBodies);
 }
 
 
