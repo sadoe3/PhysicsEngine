@@ -21,3 +21,4 @@ ipch/
 *.ncb
 *.pdb
 *.obj
+imgui.ini
