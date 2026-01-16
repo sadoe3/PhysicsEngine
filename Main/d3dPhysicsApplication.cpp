@@ -1,7 +1,6 @@
 ﻿#include "PCH.h"
 #include "d3dPhysicsApplication.h"
 
-
 const int gNumFrameResources = GeneralData::NumFrameResources;
 
 // imgui

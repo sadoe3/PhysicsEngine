@@ -16,14 +16,14 @@ struct collisionPair_t {
 	}
 };
 
-struct psuedoBody_t {
+struct pseudoBody_t {
 	int id;
 	float value;
 	bool isMin;
 };
 
 int CompareSAP(const void* lhs, const void* rhs);
-void SortBodiesBounds(const Body* bodies, const int numBodies, psuedoBody_t* sortedArray, const float deltaSecond);
-void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const psuedoBody_t* sortedBodies, const int numBodies);
+void SortBodiesBounds(const Body* bodies, const int numBodies, pseudoBody_t* sortedArray, const float deltaSecond);
+void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const pseudoBody_t* sortedBodies, const int numBodies);
 void SweepAndPrune1D(const Body* bodies, const int numBodies, std::vector<collisionPair_t>& finalPairs, const float deltaSecond);
 void BroadPhase( const Body * bodies, const int numBodies, std::vector< collisionPair_t > & finalPairs, const float deltaSecond);

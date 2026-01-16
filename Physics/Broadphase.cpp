@@ -6,14 +6,14 @@
 
 
 int CompareSAP(const void* lhs, const void* rhs) {
-	const psuedoBody_t* left = reinterpret_cast<const psuedoBody_t*>(lhs);
-	const psuedoBody_t* right = reinterpret_cast<const psuedoBody_t*>(rhs);
+	const pseudoBody_t* left = reinterpret_cast<const pseudoBody_t*>(lhs);
+	const pseudoBody_t* right = reinterpret_cast<const pseudoBody_t*>(rhs);
 
 	if (left->value < right->value)
 		return -1;
 	return 1;
 }
-void SortBodiesBounds(const Body* bodies, const int numBodies, psuedoBody_t* sortedArray, const float deltaSecond) {
+void SortBodiesBounds(const Body* bodies, const int numBodies, pseudoBody_t* sortedArray, const float deltaSecond) {
 
     // --- 1. Dynamic Axis Selection for Optimal Sweep-and-Prune ---
     float minX = FLT_MAX, minY = FLT_MAX, minZ = FLT_MAX;
@@ -84,9 +84,9 @@ void SortBodiesBounds(const Body* bodies, const int numBodies, psuedoBody_t* sor
     }
 
     // 3. Sort the endpoints array. Assuming CompareSAP handles float comparison correctly.
-    qsort(sortedArray, numBodies * 2, sizeof(psuedoBody_t), CompareSAP);
+    qsort(sortedArray, numBodies * 2, sizeof(pseudoBody_t), CompareSAP);
 }
-void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const psuedoBody_t* sortedBodies, const int numBodies) {
+void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const pseudoBody_t* sortedBodies, const int numBodies) {
     collisionPairs.clear();
 
     // The Active List stores the ID of bodies currently overlapping along the sweep axis.
@@ -94,7 +94,7 @@ void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const psuedoBody_t
 
     const int doubleNumBodies = numBodies * 2;
     for (int targetBodyIndex = 0; targetBodyIndex < doubleNumBodies; ++targetBodyIndex) {
-        const psuedoBody_t& targetBody = sortedBodies[targetBodyIndex];
+        const pseudoBody_t& targetBody = sortedBodies[targetBodyIndex];
         int bodyId = targetBody.id;
 
         if (targetBody.isMin) {
@@ -126,7 +126,7 @@ void BuildPairs(std::vector<collisionPair_t>& collisionPairs, const psuedoBody_t
 }
 void SweepAndPrune1D(const Body* bodies, const int numBodies, std::vector<collisionPair_t>& finalPairs, const float deltaSecond) {
     // reserve space on the stack for 2 endpoints per body.
-    std::vector<psuedoBody_t> sortedBodies(numBodies * 2);
+    std::vector<pseudoBody_t> sortedBodies(numBodies * 2);
 
     SortBodiesBounds(bodies, numBodies, sortedBodies.data(), deltaSecond);
 
